@@ -1,93 +1,73 @@
+# streamlit_app.py
+
 import streamlit as st
+from openai import OpenAI
 from PIL import Image
 import io
-import requests
-import json
 
-# ------------------ Page Config ------------------
-st.set_page_config(page_title="AI Medical Image Explainer", page_icon="🩺", layout="wide")
-st.title("AI Medical Image Explainer 🩺")
-st.write("Upload an X-ray or MRI and get AI analysis in simple terms.")
+st.set_page_config(page_title="AI Medical Image Explainer", layout="centered")
 
-# ------------------ Image Upload ------------------
-uploaded_file = st.file_uploader("Upload Medical Image", type=["png", "jpg", "jpeg"])
+st.title("🩺 AI Medical Image Explainer")
+st.write("Upload a medical image (X-ray, MRI, etc.), and get an easy-to-understand explanation of abnormalities.")
+
+# Initialize OpenAI-compatible client
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=st.secrets["OPENROUTER_API_KEY"]
+)
+
+# Model: Google Gemini 1.5 Flash via OpenRouter
+MODEL = "google/gemini-1.5-flash"
+
+uploaded_file = st.file_uploader("Upload Medical Image", type=["png", "jpg", "jpeg", "dcm"])
 
 if uploaded_file:
     image = Image.open(uploaded_file)
+    
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.image(image, caption="Uploaded Image", width=300)
 
-    # Resize for faster upload
-    max_size = (1024, 1024)
-    image.thumbnail(max_size)
-    st.image(image, caption="Uploaded Image", use_column_width=True)
+    with col2:
+        with st.spinner("Analyzing image with AI..."):
+            try:
+                # Convert image to bytes
+                buf = io.BytesIO()
+                image.save(buf, format="JPEG")
+                img_bytes = buf.getvalue()
 
-    # ------------------ Upload to Imgbb ------------------
-    with st.spinner("Uploading image..."):
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        img_bytes = buffered.getvalue()
-        try:
-            imgbb_api_key = st.secrets["IMGBB_API_KEY"]
-            response = requests.post(
-                "https://api.imgbb.com/1/upload",
-                params={"key": imgbb_api_key},
-                files={"image": img_bytes},
-                timeout=30
-            )
-            result = response.json()
-            if result["success"]:
-                image_url = result["data"]["url"]
-                st.success("Image uploaded successfully!")
-            else:
-                st.error("Failed to upload image.")
-                st.stop()
-        except Exception as e:
-            st.error(f"Error uploading image: {e}")
-            st.stop()
-
-    # ------------------ Send to OpenRouter Gemini 2.5 ------------------
-    with st.spinner("Analyzing image... This may take 10-30 seconds..."):
-        try:
-            openrouter_api_key = st.secrets["OPENROUTER_API_KEY"]
-            endpoint = "https://openrouter.ai/api/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {openrouter_api_key}",
-                "Content-Type": "application/json"
-            }
-            data = {
-                "model": "google/gemini-2.5-flash-image-preview:free",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Analyze this medical image and explain abnormalities in simple terms."},
-                            {"type": "image_url", "image_url": {"url": image_url}}
-                        ]
-                    }
-                ]
-            }
-            response = requests.post(endpoint, headers=headers, data=json.dumps(data), timeout=60)
-            if response.status_code == 200:
-                result = response.json()
-                explanation = result.get("output_text", "")
-                if not explanation:
-                    # Fallback if output_text not present
-                    explanation = json.dumps(result, indent=2)
-
-                st.success("Analysis Complete ✅")
-                with st.expander("Show Explanation"):
-                    st.write(explanation)
-
-                # Download Explanation as TXT
-                st.download_button(
-                    label="Download Explanation",
-                    data=explanation,
-                    file_name="medical_image_analysis.txt",
-                    mime="text/plain"
+                # Call OpenRouter (Gemini Flash)
+                response = client.chat.completions.create(
+                    model=MODEL,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Explain any abnormalities in this medical image in simple, non-technical terms suitable for patients or students."},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode()}"
+                                    }
+                                },
+                            ],
+                        }
+                    ],
+                    max_tokens=500,
                 )
-            else:
-                st.error(f"Error {response.status_code}: {response.text}")
-        except Exception as e:
-            st.error(f"Analysis failed: {e}")
+                explanation = response.choices[0].message.content
+            except Exception as e:
+                st.error(f"Error: {e}")
+                explanation = None
 
-else:
-    st.warning("Please upload a medical image to analyze.")
+    if explanation:
+        with st.expander("📄 AI Explanation", expanded=True):
+            st.write(explanation)
+
+        # Download as text
+        st.download_button(
+            label="💾 Download Explanation as Text",
+            data=explanation,
+            file_name="medical_image_explanation.txt",
+            mime="text/plain"
+        )
