@@ -1,42 +1,43 @@
-# streamlit_app.py
-
 import streamlit as st
 from openai import OpenAI
 from PIL import Image
+import base64
 import io
 
-st.set_page_config(page_title="AI Medical Image Explainer", layout="centered")
-
+st.set_page_config(page_title="🩺 AI Medical Image Explainer", layout="centered")
 st.title("🩺 AI Medical Image Explainer")
-st.write("Upload a medical image (X-ray, MRI, etc.), and get an easy-to-understand explanation of abnormalities.")
+st.write("Upload a medical image (X-ray, MRI, etc.), and get an easy-to-understand explanation.")
 
-# Initialize OpenAI-compatible client
+# ✅ Load API key from secrets
+api_key = st.secrets["OPENROUTER_API_KEY"]
+
+# ✅ Initialize client safely
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=st.secrets["OPENROUTER_API_KEY"]
+    api_key=api_key,
+    default_headers={
+        "HTTP-Referer": "https://your-app-name.streamlit.app",  # Replace with your actual URL
+        "X-Title": "AI Medical Image Explainer"
+    }
 )
 
-# Model: Google Gemini 1.5 Flash via OpenRouter
 MODEL = "google/gemini-1.5-flash"
 
-uploaded_file = st.file_uploader("Upload Medical Image", type=["png", "jpg", "jpeg", "dcm"])
+uploaded_file = st.file_uploader("Upload Medical Image", type=["png", "jpg", "jpeg"])
 
 if uploaded_file:
     image = Image.open(uploaded_file)
-    
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        st.image(image, caption="Uploaded Image", width=300)
+    st.image(image, caption="Uploaded Image", width=400)
 
-    with col2:
-        with st.spinner("Analyzing image with AI..."):
+    if st.button("Analyze Image"):
+        with st.spinner("Asking AI to explain..."):
             try:
-                # Convert image to bytes
+                # Convert image to base64
                 buf = io.BytesIO()
                 image.save(buf, format="JPEG")
                 img_bytes = buf.getvalue()
+                img_b64 = base64.b64encode(img_bytes).decode()
 
-                # Call OpenRouter (Gemini Flash)
                 response = client.chat.completions.create(
                     model=MODEL,
                     messages=[
@@ -47,7 +48,7 @@ if uploaded_file:
                                 {
                                     "type": "image_url",
                                     "image_url": {
-                                        "url": f"data:image/jpeg;base64,{base64.b64encode(img_bytes).decode()}"
+                                        "url": f"data:image/jpeg;base64,{img_b64}"
                                     }
                                 },
                             ],
@@ -56,18 +57,16 @@ if uploaded_file:
                     max_tokens=500,
                 )
                 explanation = response.choices[0].message.content
+
+                with st.expander("📄 AI Explanation", expanded=True):
+                    st.write(explanation)
+
+                st.download_button(
+                    label="💾 Download Explanation",
+                    data=explanation,
+                    file_name="medical_explanation.txt",
+                    mime="text/plain"
+                )
+
             except Exception as e:
-                st.error(f"Error: {e}")
-                explanation = None
-
-    if explanation:
-        with st.expander("📄 AI Explanation", expanded=True):
-            st.write(explanation)
-
-        # Download as text
-        st.download_button(
-            label="💾 Download Explanation as Text",
-            data=explanation,
-            file_name="medical_image_explanation.txt",
-            mime="text/plain"
-        )
+                st.error(f"❌ API Error: {str(e)}")
