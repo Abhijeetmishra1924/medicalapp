@@ -1,72 +1,44 @@
-import streamlit as st
 from openai import OpenAI
+import streamlit as st
 from PIL import Image
 import base64
 import io
 
-st.set_page_config(page_title="🩺 AI Medical Image Explainer", layout="centered")
 st.title("🩺 AI Medical Image Explainer")
-st.write("Upload a medical image (X-ray, MRI, etc.), and get an easy-to-understand explanation.")
+uploaded_file = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"])
 
-# ✅ Load API key from secrets
-api_key = st.secrets["OPENROUTER_API_KEY"]
-
-# ✅ Initialize client safely
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=api_key,
-    default_headers={
-        "HTTP-Referer": "https://your-app-name.streamlit.app",  # Replace with your actual URL
-        "X-Title": "AI Medical Image Explainer"
-    }
+    api_key=st.secrets["OPENROUTER_API_KEY"]
 )
-
-MODEL = "google/gemini-1.5-flash"
-
-uploaded_file = st.file_uploader("Upload Medical Image", type=["png", "jpg", "jpeg"])
 
 if uploaded_file:
     image = Image.open(uploaded_file)
-    st.image(image, caption="Uploaded Image", width=400)
+    st.image(image, width=300)
 
-    if st.button("Analyze Image"):
-        with st.spinner("Asking AI to explain..."):
+    if st.button("Analyze"):
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG")
+        img_b64 = base64.b64encode(buf.getvalue()).decode()
+
+        with st.spinner("Getting explanation..."):
             try:
-                # Convert image to base64
-                buf = io.BytesIO()
-                image.save(buf, format="JPEG")
-                img_bytes = buf.getvalue()
-                img_b64 = base64.b64encode(img_bytes).decode()
-
                 response = client.chat.completions.create(
-                    model=MODEL,
+                    model="google/gemini-1.5-flash",
                     messages=[
                         {
                             "role": "user",
                             "content": [
-                                {"type": "text", "text": "Explain any abnormalities in this medical image in simple, non-technical terms suitable for patients or students."},
+                                {"type": "text", "text": "Explain any abnormalities in simple terms."},
                                 {
                                     "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{img_b64}"
-                                    }
-                                },
-                            ],
+                                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+                                }
+                            ]
                         }
                     ],
-                    max_tokens=500,
+                    max_tokens=500
                 )
-                explanation = response.choices[0].message.content
-
-                with st.expander("📄 AI Explanation", expanded=True):
-                    st.write(explanation)
-
-                st.download_button(
-                    label="💾 Download Explanation",
-                    data=explanation,
-                    file_name="medical_explanation.txt",
-                    mime="text/plain"
-                )
-
+                st.write(response.choices[0].message.content)
             except Exception as e:
-                st.error(f"❌ API Error: {str(e)}")
+                st.error(f"Error: {e}")
