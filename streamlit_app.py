@@ -3,6 +3,7 @@ from PIL import Image
 import io
 import base64
 import requests
+import json
 
 # ------------------ Page Config ------------------
 st.set_page_config(
@@ -46,7 +47,6 @@ st.sidebar.markdown("Powered by Google Gemini 2.5 API via OpenRouter")
 if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Uploaded Image", use_column_width=True)
-
     st.info("Analyzing image... This may take a few seconds.")
 
     # Convert image to base64
@@ -66,9 +66,10 @@ if uploaded_file:
         "messages": [
             {
                 "role": "user",
-                "content": f"Analyze this medical image and explain any abnormalities in simple terms. Here is the image: {img_str}"
+                "content": "Explain any abnormalities in this medical image in simple terms."
             }
-        ]
+        ],
+        "image": img_str  # send image as separate field
     }
 
     # Make API request
@@ -76,7 +77,14 @@ if uploaded_file:
         response = requests.post(endpoint, headers=headers, json=data)
         if response.status_code == 200:
             result = response.json()
-            explanation = result['choices'][0]['message']['content']
+            # Updated path depending on OpenRouter response
+            explanation = ""
+            if "output_text" in result:
+                explanation = result["output_text"]
+            elif "choices" in result and len(result["choices"]) > 0:
+                explanation = result["choices"][0].get("message", {}).get("content", "")
+            else:
+                explanation = json.dumps(result, indent=2)
 
             st.success("Analysis Complete ✅")
             with st.expander("Show Explanation"):
